@@ -3,213 +3,102 @@ import dlib
 import eos
 import cv2
 import sys
+import os
 
-def read_pts(filename):
-    """A helper function to read the 68 ibug landmarks from a .pts file."""
-    lines = open(filename).read().splitlines()
-    lines = lines[3:71]
+class Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(*args, **kwargs)
+            print(1)
+        else:
+            cls._instances[cls].__init__(*args, **kwargs)
+            print(2)
+            
+        return cls._instances[cls]
 
-    landmarks = []
-    ibug_index = 1  # count from 1 to 68 for all ibug landmarks
-    for l in lines:
-        coords = l.split()
-        landmarks.append(eos.core.Landmark(str(ibug_index), [float(coords[0]), float(coords[1])]))
-        ibug_index = ibug_index + 1
+class FaceRecon(metaclass=Singleton):
+    def __init__(self, root_path):
+        # load detector,shape predictor
+        detector = dlib.get_frontal_face_detector()
+        shape_predictor = dlib.shape_predictor(os.path.join(root_path, 'res/68.dat'))
 
-    return landmarks
+        # load eos model
+        model = eos.morphablemodel.load_model(os.path.join(root_path, "res/sfm_shape_3448.bin"))
+        blendshapes = eos.morphablemodel.load_blendshapes(os.path.join(root_path, "res/expression_blendshapes_3448.bin"))
 
-def visualize_dominant(counts, palette, img) :
-    import matplotlib.pyplot as plt
+        # Create a MorphableModel with expressions from the loaded neutral model and blendshapes:
+        morphablemodel_with_expressions = eos.morphablemodel.MorphableModel(model.get_shape_model(), blendshapes,
+                                                                            color_model=eos.morphablemodel.PcaModel(),
+                                                                            vertex_definitions=None,
+                                                                            texture_coordinates=model.get_texture_coordinates())
+        landmark_mapper = eos.core.LandmarkMapper(os.path.join(root_path, 'res/ibug_to_sfm.txt'))
+        edge_topology = eos.morphablemodel.load_edge_topology(os.path.join(root_path, 'res/sfm_3448_edge_topology.json'))
+        contour_landmarks = eos.fitting.ContourLandmarks.load(os.path.join(root_path, 'res/ibug_to_sfm.txt'))
+        model_contour = eos.fitting.ModelContour.load(os.path.join(root_path, 'res/sfm_model_contours.json'))
 
-    indices = np.argsort(counts)[::-1]   
-    freqs = np.cumsum(np.hstack([[0], counts[indices]/counts.sum()]))
-    rows = np.int_(img.shape[0]*freqs)
+        self.detector = detector
+        self.shape_predictor = shape_predictor
+        self.morphablemodel_with_expressions = morphablemodel_with_expressions
+        self.landmark_mapper = landmark_mapper
+        self.edge_topology = edge_topology
+        self.contour_landmarks = contour_landmarks
+        self.model_contour = model_contour
 
-    dom_patch = np.zeros(shape=img.shape, dtype=np.uint8)
-    for i in range(len(rows) - 1):
-        dom_patch[rows[i]:rows[i + 1], :, :] += np.uint8(palette[indices[i]])
+    def generate(self, i, o, mask) : # input name, output name, root path of recon code
+        # load image
+        img = cv2.imread(i) # i : cropped square image. # ex) i : <django_project_root_path>/media/img/user_image.jpg
+        image_height, image_width, _ = img.shape
 
-    plt.imshow(cv2.cvtColor(dom_patch, cv2.COLOR_BGR2RGB))
-    plt.show()
+        # get bounding box and facial landmarks
+        boxes = self.detector(img)
+        landmarks = []
+        for box in boxes:
+            shape = self.shape_predictor(img, box)
+            index = 1
+            for part in shape.parts():
+                landmarks.append(eos.core.Landmark(str(index),[float(part.x),float(part.y)]))
+                index +=1
 
-def generate(i, o, mask, root_path) : # input name, output name
-    # load detector,shape predictor and image
-    detector = dlib.get_frontal_face_detector()
-    shape_predictor = dlib.shape_predictor(root_path + 'res/68.dat')
-    print(i)
-    img = cv2.imread(i + "cropped.png") # i : cropped square image.
-    image_height, image_width, _ = img.shape
+        (mesh, pose, shape_coeffs, blendshape_coeffs) = eos.fitting.fit_shape_and_pose(self.morphablemodel_with_expressions,
+            landmarks, self.landmark_mapper, image_width, image_height, self.edge_topology, self.contour_landmarks, self.model_contour)
 
-    # get bounding box and facial landmarks
-    boxes = detector(img)
-    landmarks = []
-    for box in boxes:
-        shape = shape_predictor(img, box)
-        index = 1
-
-        center_point = [shape.parts()[5].x + shape.parts()[48].x,  shape.parts()[5].y + shape.parts()[48].y ]
-         
-        cl = img[int(center_point[1]/2), int(center_point[0]/2)] # face random color
-        maxy = shape.parts()[24].y # eyebrow
-        maxy_2 = shape.parts()[19].y # eyebrow
-
-        # 얼굴 가장 좌, 우 지점
-        x0 = shape.parts()[0].x
-        y0 = shape.parts()[0].y
-        x16 = shape.parts()[16].x
-        y16 = shape.parts()[16].y
-
-        # box for "good" face skin area.
-        mx, my, MX, MY = shape.parts()[47].x + 20, shape.parts()[47].y + 20, shape.parts()[14].x - 10, shape.parts()[14].y - 10
-        pts1 = np.float32([[mx, my],[mx, MY],[MX, my],[MX, MY]])
-        pts2 = np.float32([[0, 0],[0, 512],[512, 0],[512, 512]])
-        M = cv2.getPerspectiveTransform(pts1, pts2)
-        dst = cv2.warpPerspective(img, M, (512,512))
-
-        # make inpainted image using good face skin area
-        #inpaint_img = np.zeros_like(img)
-        #inpaint_img[mx:MX, my:MY] = img[mx:MX, my:MY]
-        #inpaint_mask = np.zeros_like(img)
-        #inpaint_mask[mx:MX, my:MY] = [255, 255, 255]
-        #inpaint_mask = cv2.cvtColor(inpaint_mask, cv2.COLOR_BGR2GRAY)
-        #flip = inpaint_mask == 255
-        #flip_inverse = inpaint_mask != 255
-        #inpaint_mask[flip] = 0
-        #inpaint_mask[flip_inverse] = 255
-
-        #inpaint_img = cv2.inpaint(inpaint_img, inpaint_mask, 10, cv2.INPAINT_TELEA)
-        """
-        from matplotlib import pyplot as plt
-        cv2.circle(img, (shape.parts()[0].x, shape.parts()[0].y), 20, (0, 50, 255), -1)
-        cv2.circle(img, (shape.parts()[16].x, shape.parts()[16].y), 20, (0, 50, 255), -1)
-        plt.imshow(img)
-        plt.show()
-        exit()
-        """
-        for part in shape.parts():
-            landmarks.append(eos.core.Landmark(str(index),[float(part.x),float(part.y)]))
-            index +=1
-        break
-
-    # load eos model
-    model = eos.morphablemodel.load_model(root_path + "res/sfm_shape_3448.bin")
-    blendshapes = eos.morphablemodel.load_blendshapes(root_path + "res/expression_blendshapes_3448.bin")
-    # Create a MorphableModel with expressions from the loaded neutral model and blendshapes:
-    morphablemodel_with_expressions = eos.morphablemodel.MorphableModel(model.get_shape_model(), blendshapes,
-                                                                        color_model=eos.morphablemodel.PcaModel(),
-                                                                        vertex_definitions=None,
-                                                                        texture_coordinates=model.get_texture_coordinates())
-    landmark_mapper = eos.core.LandmarkMapper(root_path + 'res/ibug_to_sfm.txt')
-    edge_topology = eos.morphablemodel.load_edge_topology(root_path + 'res/sfm_3448_edge_topology.json')
-    contour_landmarks = eos.fitting.ContourLandmarks.load(root_path + 'res/ibug_to_sfm.txt')
-    model_contour = eos.fitting.ModelContour.load(root_path + 'res/sfm_model_contours.json')
-
-    (mesh, pose, shape_coeffs, blendshape_coeffs) = eos.fitting.fit_shape_and_pose(morphablemodel_with_expressions,
-        landmarks, landmark_mapper, image_width, image_height, edge_topology, contour_landmarks, model_contour)
-
-    # read segmetation mask
-    seg = cv2.imread(i+"mask.png") # 0 : background , 127 : hair, 254 : face // grayscale image
-    seg = cv2.cvtColor(seg, cv2.COLOR_BGR2GRAY)
-    
-    # need to up-sample mask so that mask is same size with input image.
-    seg_alias = cv2.resize(seg, (img.shape[0], img.shape[1]))
-    seg = cv2.resize(seg, (img.shape[0], img.shape[1]),interpolation=cv2.INTER_NEAREST) # no anti-alising
-    face_boarder = seg != seg_alias 
-    
-    # mask
-    background = seg == 0
-    hair = seg == 127
-    face = seg == 254
-    # find donminant face color..
-    #pixels = np.float32(img[face].reshape(-1, 3))
-    
-    #pixels = img[face].astype('float32')
-    #n_colors = 5
-    #criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, .1)
-    #flags = cv2.KMEANS_RANDOM_CENTERS
-
-    #_, labels, palette = cv2.kmeans(pixels, n_colors, None, criteria, 10, flags)
-    #_, counts = np.unique(labels, return_counts=True)
-    
-    # option 1
-    #dominant = palette[np.argmax(counts)] # dominant color.
-    
-    # option 2
-    #dominant = np.average(palette, axis=0 ,weights=counts)
-    
-    # option 3 : any face color...
-    #dominant = np.average(img[face], axis=0)
-    
-    # option 4 : face color
-    # dominant = cl
-
-    #visualize_dominant(counts, palette, img)
-    # for debugging
-
-    # key color
-    key_color = [7, 28, 98]
-    hair_color = [28, 7, 98]
-    boarder_color = [98, 7, 28]
-
-    img[hair] = key_color
-    img[background] = key_color
-    img[face_boarder] = boarder_color
-
-    #print(face_boarder.shape)
-    
-    #앞머리
-    img[ : maxy-100 , :] = key_color
-    img[ : maxy_2 - 100, :] = key_color
-    
-    # 옆면
-    #img[:y0,:x0] = key_color
-    #img[:y16, x16: ] = key_color
-    
-
-    isomap = eos.render.extract_texture(mesh, pose, img)
-    isomap = cv2.transpose(isomap)
-
-
-    empty = np.all( isomap == [0, 0, 0, 0], axis=-1)
-    key_color = [7, 28, 98, 255]
-    key_hair_color = [28, 7, 98, 255]
-    key_boarder_color = [98, 7, 28, 255]
-
-    kc = np.all( isomap == key_color, axis = -1)
-    #kc_hair = np.all( isomap == key_hair_color, axis = -1)
-    kc_boarder = np.all( isomap == key_boarder_color, axis = -1)
-
-    use_dst = kc 
-    mask = kc_boarder
-    mask_gray = np.zeros_like(mask).astype('uint8')
-    mask_gray[mask] = 255
-    kernel = np.ones((5,5), np.uint8)
-    mask_gray = cv2.dilate(mask_gray, kernel, iterations=3)
-    mask_gray[empty] = 255
-    #isomap[empty] = (dominant[0], dominant[1], dominant[2], 255)
-    
-    """
-    from scipy.ndimage import gaussian_filter
-    import matplotlib.pyplot as plt
-
-    plt.imshow(img)
-    plt.show()
-    """
-    eos.core.write_textured_obj(mesh, o + ".obj")
-    print(o)
-
-    isomap = cv2.cvtColor(isomap, cv2.COLOR_RGBA2RGB)
-    isomap[use_dst] = dst[use_dst] 
-
+        # read segmetation mask
+        seg = cv2.imread(mask) # 0 : background , 127 : hair, 254 : face // grayscale image
+        seg = cv2.cvtColor(seg, cv2.COLOR_BGR2GRAY)
         
-    """
-    plt.imshow(mask_gray)
-    plt.show()
-    """
+        # need to up-sample mask so that mask is same size with input image.
+        seg = cv2.resize(seg, (img.shape[0], img.shape[1]))
 
-    isomap = cv2.inpaint(isomap, mask_gray, 21, cv2.INPAINT_TELEA) # kernel size (third parameter) could be lower to reduce time delay.
+        # mask
+        background = seg == 0
+        hair = seg == 127
+        face = seg == 254
 
-    cv2.imwrite(i + ".isomap.png", cv2.cvtColor(isomap, cv2.COLOR_RGB2RGBA))
+        # find donminant face color..
+        #pixels = np.float32(img[face].reshape(-1, 3))
+        
+        pixels = img[face].astype('float32')
+        n_colors = 5
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, .1)
+        flags = cv2.KMEANS_RANDOM_CENTERS
 
-if __name__ == "__main__":
-    generate(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+        _, labels, palette = cv2.kmeans(pixels, n_colors, None, criteria, 10, flags)
+        _, counts = np.unique(labels, return_counts=True)
+        
+        # option 1
+        dominant = palette[np.argmax(counts)] # dominant color.
+        
+        # option 2
+        dominant = np.average(palette, axis=0 ,weights=counts)
+        
+        img[hair] = dominant
+        img[background] = dominant
+        
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2RGBA)
+        
+        isomap = eos.render.extract_texture(mesh, pose, img)
+        isomap = cv2.transpose(isomap)
+        eos.core.write_textured_obj(mesh, o[:-4] + ".obj") # ex) <django_project_root_path>/media/recon_result/user_image.obj
+        
+        cv2.imwrite(o[:-4] + ".isomap.png", isomap) # ex) <django_project_root_path>/media/recon_result/user_image.isomap.png
