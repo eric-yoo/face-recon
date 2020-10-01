@@ -18,32 +18,37 @@ class Singleton(type):
         return cls._instances[cls]
 
 class FaceRecon(metaclass=Singleton):
+    cnt = 0
     def __init__(self, root_path):
-        # load detector,shape predictor
-        detector = dlib.get_frontal_face_detector()
-        shape_predictor = dlib.shape_predictor(os.path.join(root_path, 'res/68.dat'))
+        if(FaceRecon.cnt == 0):
+            FaceRecon.cnt += 1
+            print(3)
+            
+            # load detector,shape predictor
+            detector = dlib.get_frontal_face_detector()
+            shape_predictor = dlib.shape_predictor(os.path.join(root_path, 'res/68.dat'))
 
-        # load eos model
-        model = eos.morphablemodel.load_model(os.path.join(root_path, "res/sfm_shape_3448.bin"))
-        blendshapes = eos.morphablemodel.load_blendshapes(os.path.join(root_path, "res/expression_blendshapes_3448.bin"))
+            # load eos model
+            model = eos.morphablemodel.load_model(os.path.join(root_path, "res/sfm_shape_3448.bin"))
+            blendshapes = eos.morphablemodel.load_blendshapes(os.path.join(root_path, "res/expression_blendshapes_3448.bin"))
 
-        # Create a MorphableModel with expressions from the loaded neutral model and blendshapes:
-        morphablemodel_with_expressions = eos.morphablemodel.MorphableModel(model.get_shape_model(), blendshapes,
-                                                                            color_model=eos.morphablemodel.PcaModel(),
-                                                                            vertex_definitions=None,
-                                                                            texture_coordinates=model.get_texture_coordinates())
-        landmark_mapper = eos.core.LandmarkMapper(os.path.join(root_path, 'res/ibug_to_sfm.txt'))
-        edge_topology = eos.morphablemodel.load_edge_topology(os.path.join(root_path, 'res/sfm_3448_edge_topology.json'))
-        contour_landmarks = eos.fitting.ContourLandmarks.load(os.path.join(root_path, 'res/ibug_to_sfm.txt'))
-        model_contour = eos.fitting.ModelContour.load(os.path.join(root_path, 'res/sfm_model_contours.json'))
+            # Create a MorphableModel with expressions from the loaded neutral model and blendshapes:
+            morphablemodel_with_expressions = eos.morphablemodel.MorphableModel(model.get_shape_model(), blendshapes,
+                                                                                color_model=eos.morphablemodel.PcaModel(),
+                                                                                vertex_definitions=None,
+                                                                                texture_coordinates=model.get_texture_coordinates())
+            landmark_mapper = eos.core.LandmarkMapper(os.path.join(root_path, 'res/ibug_to_sfm.txt'))
+            edge_topology = eos.morphablemodel.load_edge_topology(os.path.join(root_path, 'res/sfm_3448_edge_topology.json'))
+            contour_landmarks = eos.fitting.ContourLandmarks.load(os.path.join(root_path, 'res/ibug_to_sfm.txt'))
+            model_contour = eos.fitting.ModelContour.load(os.path.join(root_path, 'res/sfm_model_contours.json'))
 
-        self.detector = detector
-        self.shape_predictor = shape_predictor
-        self.morphablemodel_with_expressions = morphablemodel_with_expressions
-        self.landmark_mapper = landmark_mapper
-        self.edge_topology = edge_topology
-        self.contour_landmarks = contour_landmarks
-        self.model_contour = model_contour
+            self.detector = detector
+            self.shape_predictor = shape_predictor
+            self.morphablemodel_with_expressions = morphablemodel_with_expressions
+            self.landmark_mapper = landmark_mapper
+            self.edge_topology = edge_topology
+            self.contour_landmarks = contour_landmarks
+            self.model_contour = model_contour
 
     def generate(self, i, o, mask) : # input name, output name, root path of recon code
         # load image
