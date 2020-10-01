@@ -32,10 +32,11 @@ def visualize_dominant(counts, palette, img) :
     plt.imshow(cv2.cvtColor(dom_patch, cv2.COLOR_BGR2RGB))
     plt.show()
 
-def generate(i, o, mask) : # input name, output name
+def generate(i, o, mask, root_path) : # input name, output name, root path of recon code
     # load detector,shape predictor and image
     detector = dlib.get_frontal_face_detector()
-    shape_predictor = dlib.shape_predictor('res/68.dat')
+    shape_predictor = dlib.shape_predictor(root_path + 'res/68.dat')
+    print(i)
     img = cv2.imread(i) # i : cropped square image.
     image_height, image_width, _ = img.shape
 
@@ -51,17 +52,17 @@ def generate(i, o, mask) : # input name, output name
 
     #landmarks = read_pts('res/image_0010.pts')
     # load eos model
-    model = eos.morphablemodel.load_model("res/sfm_shape_3448.bin")
-    blendshapes = eos.morphablemodel.load_blendshapes("res/expression_blendshapes_3448.bin")
+    model = eos.morphablemodel.load_model(root_path + "res/sfm_shape_3448.bin")
+    blendshapes = eos.morphablemodel.load_blendshapes(root_path + "res/expression_blendshapes_3448.bin")
     # Create a MorphableModel with expressions from the loaded neutral model and blendshapes:
     morphablemodel_with_expressions = eos.morphablemodel.MorphableModel(model.get_shape_model(), blendshapes,
                                                                         color_model=eos.morphablemodel.PcaModel(),
                                                                         vertex_definitions=None,
                                                                         texture_coordinates=model.get_texture_coordinates())
-    landmark_mapper = eos.core.LandmarkMapper('res/ibug_to_sfm.txt')
-    edge_topology = eos.morphablemodel.load_edge_topology('res/sfm_3448_edge_topology.json')
-    contour_landmarks = eos.fitting.ContourLandmarks.load('res/ibug_to_sfm.txt')
-    model_contour = eos.fitting.ModelContour.load('res/sfm_model_contours.json')
+    landmark_mapper = eos.core.LandmarkMapper(root_path + 'res/ibug_to_sfm.txt')
+    edge_topology = eos.morphablemodel.load_edge_topology(root_path + 'res/sfm_3448_edge_topology.json')
+    contour_landmarks = eos.fitting.ContourLandmarks.load(root_path + 'res/ibug_to_sfm.txt')
+    model_contour = eos.fitting.ModelContour.load(root_path + 'res/sfm_model_contours.json')
 
     (mesh, pose, shape_coeffs, blendshape_coeffs) = eos.fitting.fit_shape_and_pose(morphablemodel_with_expressions,
         landmarks, landmark_mapper, image_width, image_height, edge_topology, contour_landmarks, model_contour)
@@ -104,7 +105,8 @@ def generate(i, o, mask) : # input name, output name
     isomap = eos.render.extract_texture(mesh, pose, img)
     isomap = cv2.transpose(isomap)
     eos.core.write_textured_obj(mesh, o + ".obj")
+    print(o)
     cv2.imwrite(o + ".isomap.png", isomap)
 
 if __name__ == "__main__":
-    generate(sys.argv[1], sys.argv[2], sys.argv[3])
+    generate(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
