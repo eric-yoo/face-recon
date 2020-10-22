@@ -76,7 +76,7 @@ class FaceRecon(metaclass=Singleton):
             y16 = shape.parts()[16].y
 
             # box for "good" face skin area.
-            mx, my, MX, MY = shape.parts()[47].x, shape.parts()[47].y, shape.parts()[14].x, shape.parts()[14].y
+            mx, my, MX, MY = shape.parts()[47].x + 20, shape.parts()[47].y + 20, shape.parts()[14].x - 10, shape.parts()[14].y - 10
             pts1 = np.float32([[mx, my],[mx, MY],[MX, my],[MX, MY]])
             pts2 = np.float32([[0, 0],[0, 512],[512, 0],[512, 512]])
             M = cv2.getPerspectiveTransform(pts1, pts2)
@@ -181,11 +181,11 @@ class FaceRecon(metaclass=Singleton):
 
         isomap = cv2.inpaint(isomap, mask_gray, 21, cv2.INPAINT_TELEA) # kernel size (third parameter) could be lower to reduce time delay.
 
-        cv2.imwrite(o[:-4] + ".isomap.png", cv2.cvtColor(isomap, cv2.COLOR_RGB2RGBA)) # ex) <django_project_root_path>/media/recon_result/user_image.isomap.png
+        cv2.imwrite(o[:-4] + "_isomap.png", cv2.cvtColor(isomap, cv2.COLOR_RGB2RGBA)) # ex) <django_project_root_path>/media/recon_result/user_image.isomap.png
         # print(face_color.shape)
         # print(np.average(face_color[:][:][0], axis=0))
         # print(np.average(face_color[:][:][1], axis=0))
         # print(np.average(face_color[:][:][2], axis=0))
         # print(hair_color)
-        cv2.imwrite(o[:-4] + "_face_color.png",  dst) # (b,g,r) face color image
+        cv2.imwrite(o[:-4] + "_scalp.png",  dst) # (b,g,r) face color image
         return (hair_dominant[2], hair_dominant[1], hair_dominant[0]) # (r,g,b) of hair color
