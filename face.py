@@ -132,11 +132,14 @@ class FaceRecon(metaclass=Singleton):
         
         # option 4 : face color
         # dominant = cl
-        
         # key color
         key_color = [7, 28, 98]
         hair_color = [28, 7, 98]
         boarder_color = [98, 7, 28]
+
+
+        img_copy = np.copy(img)
+        img_copy[face] = key_color
 
         img[hair] = key_color
         img[background] = key_color
@@ -144,17 +147,15 @@ class FaceRecon(metaclass=Singleton):
 
 
         #앞머리
-        img[ : max(0, maxy-100) , :] = key_color
-        img[ : max(0, maxy_2 - 100), :] = key_color
-            
-        print(img)
-        print(maxy)
-        print(maxy_2)
-        print(img.shape)
+        img[ : max(0, maxy-150) , :] = key_color
+        img[ : max(0, maxy_2 - 150), :] = key_color
+        
 
         isomap = eos.render.extract_texture(mesh, pose, img)
+        isomap_copy = eos.render.extract_texture(mesh, pose, img_copy)
         # cv2.imwrite(o[:-4] + ".isomap.png", isomap)
         isomap = cv2.transpose(isomap)
+        isomap_copy = cv2.transpose(isomap_copy)
 
         empty = np.all( isomap == [0, 0, 0, 0], axis=-1)
         key_color = [7, 28, 98, 255]
@@ -164,20 +165,29 @@ class FaceRecon(metaclass=Singleton):
         kc = np.all( isomap == key_color, axis = -1)
         #kc_hair = np.all( isomap == key_hair_color, axis = -1)
         kc_boarder = np.all( isomap == key_boarder_color, axis = -1)
+        kc_boarder_copy = np.all( isomap_copy == key_color, axis = -1)
 
         use_dst = kc 
         mask = kc_boarder
+        mask_face = kc_boarder_copy
+
         mask_gray = np.zeros_like(mask).astype('uint8')
         mask_gray[mask] = 255
         kernel = np.ones((5,5), np.uint8)
         mask_gray = cv2.dilate(mask_gray, kernel, iterations=7)
         mask_gray[empty] = 255
+        mask_gray[mask_face] = 0
+        kc_boarder = np.all( isomap == key_boarder_color, axis = -1)
+        mask_gray[kc_boarder] = 255
         #isomap[empty] = (dominant[0], dominant[1], dominant[2], 255)
         
         eos.core.write_textured_obj(mesh, o[:-4] + ".obj") # ex) <django_project_root_path>/media/recon_result/user_image.obj
 
         isomap = cv2.cvtColor(isomap, cv2.COLOR_RGBA2RGB)
         isomap[use_dst] = dst[use_dst] 
+
+        cv2.imwrite("temp.png", cv2.cvtColor(isomap, cv2.COLOR_RGB2RGBA))
+        cv2.imwrite("temp_mask.png", mask_gray)
 
         isomap = cv2.inpaint(isomap, mask_gray, 21, cv2.INPAINT_TELEA) # kernel size (third parameter) could be lower to reduce time delay.
 
